@@ -23,7 +23,7 @@ PAGE_SIZE  = 32   # cards shown per page in the UI
 
 # ─── Page Config ─────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="WP Media Alt Manager",
+    page_title="Ran - WP Media Alt Manager",
     page_icon="🖼️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -251,7 +251,7 @@ with st.sidebar:
 # ─── Main Header ─────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="app-header">
-  <h1>🖼️ WP Media Alt Manager</h1>
+  <h1>🖼️ Ran - WP Media Alt Manager</h1>
   <p>Bulk manage WordPress image alt texts — powered by GPT-4o Vision</p>
 </div>
 """, unsafe_allow_html=True)
