@@ -1,0 +1,10 @@
+__pycache__/
+.test-tmp/
+backups/
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+app_backup.py
+.venv/
+venv/
