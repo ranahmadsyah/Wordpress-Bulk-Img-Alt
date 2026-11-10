@@ -1,6 +1,8 @@
 """WordPress media fetch and usage helpers; no Streamlit dependencies."""
 import html
+import ipaddress
 import re
+import socket
 from html.parser import HTMLParser
 from urllib.parse import parse_qs, unquote, urljoin, urlsplit
 
@@ -129,12 +131,92 @@ def _image_paths(item):
     return {unquote(urlsplit(url).path) for url in urls if url}
 
 
-def fetch_url_media(site, auth, page_url, progress=None):
-    """Return this published post/page's library images and unmatched image URLs.
+class _PublicPageImages(HTMLParser):
+    """Separate page content from site chrome and ignore clearly labelled logos."""
+    _void = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'}
 
-    Query only the configured CMS. The supplied URL is a lookup key, never an
-    authenticated request destination. Require a matching permalink to avoid
-    selecting a different page with the same final slug.
+    def __init__(self):
+        super().__init__()
+        self.stack = []
+        self.scopes = {}
+        self.title = ''
+        self.featured = ''
+
+    def handle_starttag(self, tag, attrs):
+        values = dict(attrs)
+        if tag not in self._void:
+            self.stack.append(tag)
+        if tag in ('main', 'article'):
+            self.scopes.setdefault(tag, _ContentImages())
+        marker = ' '.join(values.get(key) or '' for key in ('alt', 'class', 'id', 'src', 'content'))
+        is_logo = re.search(r'\blogo\b', re.sub(r'[-_]', ' ', marker), re.I)
+        if tag == 'meta' and values.get('property') == 'og:image' and not is_logo:
+            self.featured = values.get('content', '')
+        if is_logo or any(tag in self.stack for tag in ('header', 'footer', 'nav', 'aside', 'script', 'template')):
+            return
+        for scope, parser in self.scopes.items():
+            if scope in self.stack:
+                parser.handle_starttag(tag, attrs)
+
+    def handle_endtag(self, tag):
+        for parser in self.scopes.values():
+            parser.handle_endtag(tag)
+        if tag in self.stack:
+            self.stack = self.stack[:len(self.stack) - 1 - self.stack[::-1].index(tag)]
+
+    def handle_data(self, data):
+        if 'title' in self.stack:
+            self.title += data
+
+
+def _fetch_public_images(page_url, progress=None):
+    """Read public HTML without CMS auth, including validation on each redirect."""
+    for _ in range(6):
+        target = urlsplit(page_url)
+        if target.scheme not in ('http', 'https') or not target.hostname or target.username or target.password:
+            raise ValueError('URL halaman publik tidak valid.')
+        addresses = socket.getaddrinfo(target.hostname, target.port or (443 if target.scheme == 'https' else 80), type=socket.SOCK_STREAM)
+        if not addresses or any(not ipaddress.ip_address(address[4][0]).is_global for address in addresses):
+            raise ValueError('Gunakan URL halaman publik; alamat jaringan lokal tidak didukung.')
+        if progress:
+            progress('Membaca gambar pada konten halaman publik...')
+        with requests.get(page_url, timeout=30, stream=True, allow_redirects=False) as response:
+            response.raise_for_status()
+            if response.is_redirect:
+                page_url = urljoin(page_url, response.headers['Location'])
+                continue
+            if 'text/html' not in response.headers.get('Content-Type', '').lower():
+                raise ValueError('URL harus membuka halaman HTML, bukan file gambar atau API.')
+            body = bytearray()
+            for chunk in response.iter_content(65536):
+                body.extend(chunk)
+                if len(body) > 5_000_000:
+                    raise ValueError('Halaman terlalu besar untuk diperiksa (maksimal 5 MB).')
+            page = _PublicPageImages()
+            page.feed(body.decode(response.encoding or 'utf-8', errors='replace'))
+            parser = page.scopes.get('main', page.scopes.get('article'))
+            if parser is None:
+                raise ValueError('Area konten main/article tidak ditemukan pada halaman publik. URL tidak dimuat agar header/footer tidak ikut.')
+            # IDs from a different frontend can belong to a different library.
+            parser.ids.clear()
+            return parser, {'link': page_url, 'title': {'rendered': page.title.strip()}, 'featured_image_url': page.featured}
+    raise ValueError('Terlalu banyak pengalihan pada URL halaman publik.')
+
+
+def _cms_image_url(site, page_url, image_url):
+    """Resolve the frontend /media/uploads/ proxy to this CMS's upload path."""
+    url = urljoin(page_url, image_url)
+    target = urlsplit(url)
+    if target.netloc == urlsplit(page_url).netloc and target.path.startswith('/media/uploads/'):
+        return site.rstrip('/') + '/wp-content/' + target.path.removeprefix('/media/')
+    return url
+
+
+def fetch_url_media(site, auth, page_url, progress=None):
+    """Return this page's library images and unmatched image URLs.
+
+    Prefer an exact published post/page permalink; otherwise read the public
+    page's main/article content. Send credentials only to the configured CMS.
     """
     page_url = page_url.strip()
     target = urlsplit(page_url)
@@ -174,13 +256,16 @@ def fetch_url_media(site, auth, page_url, progress=None):
                 page += 1
             if post:
                 break
-        if not post:
-            raise ValueError('URL tidak ditemukan pada post/page terpublikasi di WordPress yang terhubung. Periksa URL dan akses akun.')
-        parser = _ContentImages()
-        content = post.get('content', {}).get('rendered', '')
-        parser.feed(content)
-        for gallery in re.findall(r'\[gallery\b[^\]]*\bids=["\']([\d,\s]+)["\']', content):
-            parser.ids.update(int(mid) for mid in re.findall(r'\d+', gallery))
+        if post:
+            parser = _ContentImages()
+            content = post.get('content', {}).get('rendered', '')
+            parser.feed(content)
+            for gallery in re.findall(r'\[gallery\b[^\]]*\bids=["\']([\d,\s]+)["\']', content):
+                parser.ids.update(int(mid) for mid in re.findall(r'\d+', gallery))
+        else:
+            parser, post = _fetch_public_images(page_url, progress)
+            endpoint = 'public_page'
+            page_url = post['link']
         featured = featured_media_id(post)
         if featured:
             parser.ids.add(featured)
@@ -199,7 +284,7 @@ def fetch_url_media(site, auth, page_url, progress=None):
         missing_ids = set(ids) - media.keys()
         if missing_ids:
             raise ValueError('Media pada konten tidak dapat diakses: ' + ', '.join(map(str, sorted(missing_ids))))
-        urls = {urljoin(page_url, url) for url in parser.urls
+        urls = {_cms_image_url(site, page_url, url) for url in parser.urls
                 if urlsplit(urljoin(page_url, url)).scheme in ('http', 'https')}
         paths = set().union(*(_image_paths(item) for item in media.values())) if media else set()
         searches, unmatched = {}, []
@@ -235,9 +320,9 @@ def fetch_url_media(site, auth, page_url, progress=None):
             else:
                 unmatched.append(url)
         if post.get('featured_image_url') and not featured:
-            featured_path = unquote(urlsplit(urljoin(page_url, post['featured_image_url'])).path)
+            featured_path = unquote(urlsplit(_cms_image_url(site, page_url, post['featured_image_url'])).path)
             featured = next((item['id'] for item in media.values() if featured_path in _image_paths(item)), None)
-            if not featured:
+            if not featured and endpoint != 'public_page':
                 raise ValueError('Featured image tidak dapat dicocokkan dengan Media Library WordPress.')
         for item in media.values():
             item['_url_in'] = [{'title': html.unescape(re.sub(r'<[^>]*>', '', post.get('title', {}).get('rendered', ''))) or '(Tanpa judul)',

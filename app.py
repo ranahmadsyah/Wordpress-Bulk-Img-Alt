@@ -237,7 +237,7 @@ with st.sidebar:
     st.markdown("---")
     with st.form("fetch_url_form"):
         fetch_page_url = st.text_input("URL artikel/halaman", placeholder="https://website.com/artikel/", key="fetch_page_url")
-        st.caption("Ambil featured image dan gambar konten dari post/page terpublikasi. Logo/header/footer tema tidak ikut. Hasil mengganti koleksi aktif.")
+        st.caption("Ambil featured image dan gambar konten URL. Jika post/page CMS tidak ditemukan, baca konten utama halaman publik. Logo/header/footer tidak ikut. Hasil mengganti koleksi aktif.")
         fetch_url_btn = st.form_submit_button("🔗 Fetch dari URL", use_container_width=True)
 
 

@@ -49,15 +49,20 @@ Choose a fetch source:
   posts (excluding pages).
 - **Fetch All Media** loads the entire WordPress media collection, including logos,
   social icons, and other attachments. Image cards still follow the image filters.
-- **Fetch dari URL** accepts a published article/page URL from the connected
-  WordPress site. It loads that page's featured image and images in its rendered
-  content, excluding theme headers, footers, and navigation. Only matching Media
+- **Fetch dari URL** accepts an article/page URL. It first looks up an exact
+  published post/page permalink in the connected WordPress site. If none matches,
+  it reads the public page's `main` content (or `article` when `main` is absent),
+  including its Open Graph featured image. Headers, footers, navigation, sidebars,
+  and clearly labelled logos are excluded from this public-page fallback. Only matching Media
   Library images are loaded, so the existing title/alt saves still work. Unmatched
   images (including external images) are reported. Existing image filters apply.
-  The lookup uses the exact permalink (or `?p=ID` / `?page_id=ID`), not just the
-  final slug. Public URLs must match the CMS's returned permalink host/path;
-  URLs on the configured CMS host with the same permalink path also work.
-  Custom post types and images stored only in builder metadata are not scanned.
+  The CMS lookup uses the exact permalink (or `?p=ID` / `?page_id=ID`), not just
+  the final slug. Public pages can use a different domain, localized route, or
+  custom content type. Same-origin `/media/uploads/` image URLs are mapped to the
+  configured CMS's `/wp-content/uploads/` path, preserving the complete directory
+  and filename when matching media. CMS credentials are never sent to the public
+  page. Local-network URLs, non-HTML responses, and pages without `main`/`article`
+  are rejected. Images created only by browser JavaScript are not scanned.
   **Kosongkan hasil URL** offers inline confirmation to clear this local collection
   and its pending edits, without deleting WordPress media or resetting the resize tab.
 
