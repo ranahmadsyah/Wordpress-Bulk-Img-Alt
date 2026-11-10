@@ -43,12 +43,23 @@ Install dependencies first: `python -m pip install -r requirements.txt`.
 
 ## Media usage
 
-Choose one of the two fetch buttons:
+Choose a fetch source:
 
 - **Fetch Featured Image Post** loads only distinct featured images of published
   posts (excluding pages).
 - **Fetch All Media** loads the entire WordPress media collection, including logos,
   social icons, and other attachments. Image cards still follow the image filters.
+- **Fetch dari URL** accepts a published article/page URL from the connected
+  WordPress site. It loads that page's featured image and images in its rendered
+  content, excluding theme headers, footers, and navigation. Only matching Media
+  Library images are loaded, so the existing title/alt saves still work. Unmatched
+  images (including external images) are reported. Existing image filters apply.
+  The lookup uses the exact permalink (or `?p=ID` / `?page_id=ID`), not just the
+  final slug. Public URLs must match the CMS's returned permalink host/path;
+  URLs on the configured CMS host with the same permalink path also work.
+  Custom post types and images stored only in builder metadata are not scanned.
+  **Kosongkan hasil URL** offers inline confirmation to clear this local collection
+  and its pending edits, without deleting WordPress media or resetting the resize tab.
 
 For featured images, the app reads lightweight post metadata in batches of 100, then
 requests only the referenced media IDs. Logos, social icons, and other media are
@@ -142,7 +153,7 @@ clear error instead of providing an oversized download. Original bytes are retai
 Run the full offline regression suite:
 
 ```powershell
-python -m unittest test_media_tools test_resize_studio -v
+python -m unittest test_media_tools test_url_media test_resize_studio -v
 ```
 
 This suite covers both fetch buttons, existing title/alt saves, all

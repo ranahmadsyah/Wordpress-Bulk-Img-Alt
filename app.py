@@ -6,7 +6,7 @@ import re
 import time
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
-from media_tools import fetch_usage, fetch_featured_media, fetch_all_media
+from media_tools import fetch_usage, fetch_featured_media, fetch_all_media, fetch_url_media
 from resize_studio import render_resize_studio
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -234,6 +234,11 @@ with st.sidebar:
     st.markdown("---")
     fetch_featured_btn = st.button("🔄 Fetch Featured Image Post", type="primary", use_container_width=True)
     fetch_all_btn = st.button("🔄 Fetch All Media", use_container_width=True)
+    st.markdown("---")
+    with st.form("fetch_url_form"):
+        fetch_page_url = st.text_input("URL artikel/halaman", placeholder="https://website.com/artikel/", key="fetch_page_url")
+        st.caption("Ambil featured image dan gambar konten dari post/page terpublikasi. Logo/header/footer tema tidak ikut. Hasil mengganti koleksi aktif.")
+        fetch_url_btn = st.form_submit_button("🔗 Fetch dari URL", use_container_width=True)
 
 
 # ─── Main Header ─────────────────────────────────────────────────────────────
@@ -248,11 +253,17 @@ with fetch_tab:
 
 
     # ─── Fetch Media ─────────────────────────────────────────────────────────────
-    if fetch_featured_btn or fetch_all_btn:
+    if fetch_featured_btn or fetch_all_btn or fetch_url_btn:
         with st.spinner("Connecting to WordPress…"):
             try:
                 fetch_status = st.empty()
-                media = get_wp_media(fetch_status.caption, featured_only=fetch_featured_btn)
+                unmatched = []
+                if fetch_url_btn:
+                    media, unmatched = fetch_url_media(WORDPRESS_URL, (USERNAME, APP_PASSWORD), fetch_page_url, fetch_status.caption)
+                    scope = "URL: " + fetch_page_url.strip()
+                else:
+                    media = get_wp_media(fetch_status.caption, featured_only=fetch_featured_btn)
+                    scope = "Featured image post terpublikasi" if fetch_featured_btn else "Semua media"
                 fetch_status.empty()
                 st.session_state.pop("media_usage", None)
                 st.session_state.pop("usage_failures", None)
@@ -260,7 +271,10 @@ with fetch_tab:
                 st.session_state.edits       = {}
                 st.session_state.title_edits = {}
                 st.session_state.connected   = True
-                st.session_state.fetch_scope = "Featured image post terpublikasi" if fetch_featured_btn else "Semua media"
+                st.session_state.fetch_scope = scope
+                st.session_state.url_unmatched = unmatched
+                if fetch_url_btn:
+                    st.session_state.media_usage = {item['id']: item.get('_url_in', []) for item in media}
                 st.session_state.ui_page     = 0
                 st.session_state.edit_gen   += 1
                 if media:
@@ -277,6 +291,21 @@ with fetch_tab:
 
     # ─── Stats + Main UI ─────────────────────────────────────────────────────────
     media_list = st.session_state.media_list
+
+    if st.session_state.get("fetch_scope", "").startswith("URL: "):
+        if st.session_state.get("url_unmatched"):
+            st.warning("Sebagian gambar konten tidak dapat dicocokkan dengan Media Library WordPress dan tidak dimuat.")
+            with st.expander("Lihat URL gambar yang tidak dimuat"):
+                for url in st.session_state.url_unmatched:
+                    st.text(url)
+        with st.expander("Kosongkan hasil URL"):
+            st.caption("Hapus koleksi URL dan perubahan lokalnya? Media di WordPress tetap tersimpan.")
+            if st.button("Ya, kosongkan hasil URL", key="clear_url_media"):
+                for key in ("media_list", "edits", "title_edits", "media_usage", "usage_failures", "fetch_scope", "url_unmatched"):
+                    st.session_state.pop(key, None)
+                st.session_state.ui_page = 0
+                st.session_state.edit_gen += 1
+                st.rerun()
 
     if media_list:
         st.caption("Koleksi aktif: " + st.session_state.get("fetch_scope", "Media yang dimuat"))
